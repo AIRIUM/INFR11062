@@ -1,1 +1,4 @@
-model
+# not track any further model generated
+
+model/*.model
+model/*.log

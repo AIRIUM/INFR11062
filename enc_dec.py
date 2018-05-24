@@ -12,7 +12,7 @@ import numpy as np
 import chainer
 from chainer import cuda, Function, gradient_check, report, training, utils, Variable
 from chainer import datasets, iterators, optimizers, serializers
-from chainer import Link, Chain, ChainList
+from chainer import Link, Chain, ChainList 
 import chainer.functions as F
 import chainer.links as L
 from chainer.training import extensions
@@ -34,8 +34,8 @@ class EncoderDecoder(Chain):
         attn        - specifies whether to use attention
     '''
     def __init__(self, vsize_enc, vsize_dec,
-                 nlayers_enc, nlayers_dec,
-                 n_units, gpuid, attn=False):
+                nlayers_enc, nlayers_dec,
+                n_units, gpuid, attn=False, dropout=0.2):
         super(EncoderDecoder, self).__init__()
         #--------------------------------------------------------------------
         # add encoder layers
@@ -47,14 +47,24 @@ class EncoderDecoder(Chain):
         '''
         ___QUESTION-1-DESCRIBE-A-START___
 
-        - Explain the following lines of code
+        - Explain the following lines of code 
         - Think about what add_link() does and how can we access Links added in Chainer.
         - Why are there two loops or adding links?
+
+        The following lines declares string list `self.lstm_enc' and `self.lstm_rev_enc' of 
+        length `nlayers_enc' which corresponds to the depth of the encoder side. The two 
+        lists keep the names used to declare chainer.links.LSTM instances, or LSTM layers, 
+        respectively for every layer of the forward and reverse pass of the bi-directional 
+        RNN encoder. The method Chain.add_link() attachs chain.links.LSTM instances with 
+        both input and output dimension set to `n_units' to the `EncoderDecoder' instance 
+        and they can be referred by `EncoderDecoder[self.lstm_enc]' and `EncoderDecoder[self.
+        lstm_rev_enc]'. The attachment process for forward pass and reverse is executed in 
+        each loop respectively. 
         '''
         self.lstm_enc = ["L{0:d}_enc".format(i) for i in range(nlayers_enc)]
         for lstm_name in self.lstm_enc:
             self.add_link(lstm_name, L.LSTM(n_units, n_units))
-
+        
         self.lstm_rev_enc = ["L{0:d}_rev_enc".format(i) for i in range(nlayers_enc)]
         for lstm_name in self.lstm_rev_enc:
             self.add_link(lstm_name, L.LSTM(n_units, n_units))
@@ -65,7 +75,7 @@ class EncoderDecoder(Chain):
         #--------------------------------------------------------------------
         # add decoder layers
         #--------------------------------------------------------------------
-
+        
         # add embedding layer
         '''
         ___QUESTION-1-DESCRIBE-B-START___
@@ -75,18 +85,30 @@ class EncoderDecoder(Chain):
         - L.Linear(2*n_units, vsize_dec)
 
         Why are we using multipliers over the base number of units (n_units)?
-        '''
 
+        This model concats the 2 hidden state vectors of length `n_units' from the 
+        bi-directional RNN encoder to a vector of length 2*n_units, therefore the length of 
+        input and ouput of all LSTM layers of the decoder is doubled to `2*n_units' to work 
+        with the vector from the encoder. `vsize_dev' is the vocabulary size of the 
+        destination language (English). The decoder's embedding layer transfers the predicted
+        word in one-hot format from last decoding to the `2*n_units' vectors and the output
+        layer transfer the hidden state vector back to vocabulary length so as to softmax and
+        select the output word.
+        '''
+  
         self.add_link("embed_dec", L.EmbedID(vsize_dec, 2*n_units))
 
         # add LSTM layers
         self.lstm_dec = ["L{0:d}_dec".format(i) for i in range(nlayers_dec)]
         for lstm_name in self.lstm_dec:
             self.add_link(lstm_name, L.LSTM(2*n_units, 2*n_units))
-
+        
         if attn > 0:
             # __QUESTION Add attention
-            pass
+            #########################################################
+            ####                     ATTN                        ####
+            #########################################################
+            self.add_link("avout", L.Linear(4*n_units, 2*n_units))
 
         # Save the attention preference
         # __QUESTION you should use this flag to check if attention
@@ -98,10 +120,11 @@ class EncoderDecoder(Chain):
         '''
         ___QUESTION-1-DESCRIBE-B-END___
         '''
-
+    
         # Store GPU id
         self.gpuid = gpuid
         self.n_units = n_units
+        self.dropout = dropout          # float: dropout ratio 0~1
 
     def reset_state(self):
         # reset the state of LSTM layers
@@ -110,9 +133,17 @@ class EncoderDecoder(Chain):
         self.loss = 0
 
     '''
-        ___QUESTION-1-DESCRIBE-C-START___
+    ___QUESTION-1-DESCRIBE-C-START___
 
         Describe what the function set_decoder_state() is doing. What are c_state and h_state?
+
+        The method `set_decoder_state()' respectively concat the context vector and hidden 
+        state vector of the deepest LSTM layer of both the forward and reverse direction of 
+        the bi-directional RNN encoder to variable `c_state' and `h_state'. The context 
+        vector and hidden state vector of the shallowest LSTM layer of the RNN decoder is 
+        then initialised with `c_state' and `h_state'. By this method the information 
+        encoded is transferred to the decode side. However, this implementation omits any 
+        other layers in the encoder side, which may cause a bottle lack.
     '''
     def set_decoder_state(self):
         xp = cuda.cupy if self.gpuid >= 0 else np
@@ -129,6 +160,7 @@ class EncoderDecoder(Chain):
         lstm_layer:  list of names of lstm layers to use
     '''
     def feed_lstm(self, word, embed_layer, lstm_layer_list, train):
+        '''
         # get embedding for word
         embed_id = embed_layer(word)
         # feed into first LSTM layer
@@ -136,11 +168,22 @@ class EncoderDecoder(Chain):
         # feed into remaining LSTM layers
         for lstm_layer in lstm_layer_list[1:]:
             hs = self[lstm_layer](hs)
-
+        '''
+        #########################################################
+        ####                  DROPOUT                        ####
+        #########################################################
+        hs = embed_layer(word) # self[lstm_layer[0]](embed_layer(word))
+        if train:
+            for lstm_layer in lstm_layer_list: # lstm_layer_list[1:]
+                hs = self[lstm_layer](F.dropout(hs, self.dropout))
+        else:
+            for lstm_layer in lstm_layer_list: # lstm_layer_list[1:]
+                hs = self[lstm_layer](hs)
+   
     # Function to encode an source sentence word
     def encode(self, word, lstm_layer_list, train):
         self.feed_lstm(word, self.embed_enc, lstm_layer_list, train)
-
+    
     # Function to decode a target sentence word
     def decode(self, word, train):
         self.feed_lstm(word, self.embed_dec, self.lstm_dec, train)
@@ -167,6 +210,12 @@ class EncoderDecoder(Chain):
             ___QUESTION-1-DESCRIBE-D-START___
 
             - Explain why we are performing two encode operations
+            As the model implements bi-directional RNN encoder, two encoding operations for the 
+            forward and reverse pass RNN are performed separately in every encoding timestep 
+            for the calculation of forward propagation. The method `encode()' calls the method 
+            `feed_lstm()' to perform the actual operation on calculation.
+
+
             '''
             self.encode(f_word, self.lstm_enc, train)
             self.encode(r_word, self.lstm_rev_enc, train)
@@ -184,7 +233,7 @@ class EncoderDecoder(Chain):
                 forward_states = self[self.lstm_enc[-1]].h
                 backward_states = self[self.lstm_rev_enc[-1]].h
                 first_entry = False
-        
+
         enc_states = F.concat((forward_states, backward_states), axis=1)
 
         return enc_states
@@ -242,7 +291,14 @@ class EncoderDecoder(Chain):
                 predicted_out = self.out(self[self.lstm_dec[-1]].h)
             else:
                 # __QUESTION Add attention
-                pass
+                #########################################################
+                ####                     ATTN                        ####
+                #########################################################
+                score = F.matmul(self[self.lstm_dec[-1]].h, enc_states.T)
+                at = F.softmax(score)
+                ct = F.reshape(F.sum(F.scale(enc_states, at.T, axis=0), axis=0), (1, enc_states.shape[1]))
+                av = F.tanh(self.avout(F.concat((ct, self[self.lstm_dec[-1]].h), axis=1)))
+                predicted_out = self.out(av)
 
             # compute loss
             prob = F.softmax(predicted_out)
@@ -252,6 +308,14 @@ class EncoderDecoder(Chain):
             ___QUESTION-1-DESCRIBE-E-START___
             Explain what loss is computed with an example
             What does this value mean?
+            The model takes softmax cross entropy as loss. Cross-entropy has 2 characteristics: 
+            non-negative; the output will approximate to 0 if the actual. This makes it feasible 
+            as loss function. Its variant for softmax is used in the model which provides a 
+            measure of the difference between the predicted output and the actually expected 
+            output. The total loss is computed by accumulating the loss on each predicted word, 
+            reflecting the total level of error made in translation.
+
+
             '''
             self.loss += F.softmax_cross_entropy(predicted_out, next_word_var)
             '''___QUESTION-1-DESCRIBE-E-END___'''
@@ -282,7 +346,13 @@ class EncoderDecoder(Chain):
                 prob = F.softmax(self.out(self[self.lstm_dec[-1]].h))
             else:
                 # __QUESTION Add attention
-                pass
+                score = F.matmul(self[self.lstm_dec[-1]].h, enc_states.T)
+                at = F.softmax(score)
+                ct = F.reshape(F.sum(F.scale(enc_states, at.T, axis=0), axis=0), (1, enc_states.shape[1]))
+                av = F.tanh(self.avout(F.concat((ct, self[self.lstm_dec[-1]].h), axis=1)))
+                prob = F.softmax(self.out(av))
+
+                alpha_arr = xp.append(alpha_arr, at.array, axis=0)
 
             pred_word = self.select_word(prob, train=False, sample=sample)
             # add integer id of predicted word to output list

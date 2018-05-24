@@ -115,7 +115,7 @@ def compute_dev_pplx():
 
                     out_str = "loss={0:.6f}".format(curr_loss)
                     pbar.set_description(out_str)
-                    pbar.update(1)
+                    #pbar.update(1)
                     num_sents += 1
 
     loss_per_sentence = loss / num_sents
@@ -159,7 +159,7 @@ def compute_dev_bleu():
             sys.stderr.flush()
             for i, (line_fr, line_en) in enumerate(zip(fr_file, en_file), start=1):
                 if i > NUM_TRAINING_SENTENCES and i <= (NUM_TRAINING_SENTENCES + NUM_DEV_SENTENCES):
-                    pbar.update(1)
+                    #pbar.update(1)
 
                     fr_sent = line_fr.strip().split()
                     en_sent = line_en.strip().split()
@@ -233,13 +233,13 @@ def train_loop(text_fname, num_training, num_epochs, log_mode="a"):
                     loss_per_epoch += loss_val
 
                     out_str = "epoch={0:d}, iter={1:d}, loss={2:.6f}, mean loss={3:.6f}".format(
-                               epoch+1, it, loss_val, (loss_per_epoch / i))
+                        epoch+1, it, loss_val, (loss_per_epoch / i))
                     pbar.set_description(out_str)
-                    pbar.update(1)
+                    #pbar.update(1)
 
                     # log every 100 sentences
-                    if i % 100 == 0:
-                        log_train_csv.writerow([it, loss_val])
+                    #if i % 100 == 0:
+                    #    log_train_csv.writerow([it, loss_val])
 
 
         # compute precision, recall and F-score
@@ -256,7 +256,7 @@ def train_loop(text_fname, num_training, num_epochs, log_mode="a"):
         print("{0:s}".format("-"*50))
         print("computing perplexity")
         pplx = compute_dev_pplx()
-        log_train_csv.writerow([epoch, pplx])
+        #log_train_csv.writerow([epoch, pplx])
 
         # Backup model every epoch
         print("Saving model")
@@ -265,28 +265,28 @@ def train_loop(text_fname, num_training, num_epochs, log_mode="a"):
         print("{0:s}".format("-"*50))
 
         # Compute Bleu every 2 epochs
-        if epoch % 2 == 0:
-            print("computing bleu")
-            bleu_score = compute_dev_bleu()
-            print("finished computing bleu ... ")
-            print("{0:s}".format("-"*50))
-            log_train_csv.writerow([epoch, bleu_score])
+        #if epoch % 2 == 0:
+        print("computing bleu")
+        bleu_score = compute_dev_bleu()
+        print("finished computing bleu ... ")
+        print("{0:s}".format("-"*50))
+        log_train_csv.writerow([(epoch+1), (loss_per_epoch/(i-1)), prec, rec, f_score, pplx, bleu_score])
         
     # At the end of training, make some predictions
     # make predictions over both training and dev sets
     print("Training set predictions")
-    _ = predict(s=0, num=3, plot=False)
+    _ = predict(s=0, num=10, plot=False)
     print("{0:s}".format("-"*50))
     print("dev set predictions")
-    _ = predict(s=NUM_TRAINING_SENTENCES, num=3, plot=False)
-    print("{0:s}".format("-"*50))
+    _ = predict(s=NUM_TRAINING_SENTENCES, num=10, plot=False)
+    #print("{0:s}".format("-"*50))
 
-    print("{0:s}".format("-"*50))
+    #print("{0:s}".format("-"*50))
     # Check if Bleu needs to be recomputed
-    if num_epochs % 2 != 0:
-        bleu_score = compute_dev_bleu()
-        print("{0:s}".format("-"*50))
-    print("{0:s}".format("-"*50))
+    #if num_epochs % 2 != 0:
+    #    bleu_score = compute_dev_bleu()
+    #    print("{0:s}".format("-"*50))
+    #print("{0:s}".format("-"*50))
 
     # close log file
     log_train_fil.close()
@@ -388,7 +388,7 @@ def predict_sentence(line_fr, line_en=None, display=True,
 
 #---------------------------------------------------------------------
 def predict(s=NUM_TRAINING_SENTENCES, num=NUM_DEV_SENTENCES, 
-            display=True, plot=False, p_filt=0, r_filt=0, sample=False):
+            display=True, plot=True, p_filt=0, r_filt=0, sample=False):
     '''
     Function to make predictions.
     s       : starting index of the line in the parallel data from which to make predictions
